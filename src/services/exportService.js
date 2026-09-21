@@ -15,7 +15,7 @@ export async function workbookToBuffer(workbook) {
  */
 export async function buildExcelBuffer(sheetName, headers, rows) {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'Memon HMS';
+  workbook.creator = 'St. Dominic Care';
   workbook.created = new Date();
   const sheet = workbook.addWorksheet(sheetName || 'Report');
   sheet.addRow(headers);
@@ -34,7 +34,7 @@ export async function buildExcelBuffer(sheetName, headers, rows) {
  */
 export async function buildMultiSheetExcel(sheets) {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'Memon HMS';
+  workbook.creator = 'St. Dominic Care';
   workbook.created = new Date();
   for (const def of sheets) {
     const sheet = workbook.addWorksheet((def.name || 'Sheet').slice(0, 31));

@@ -1,4 +1,4 @@
-# MEMON COMMUNITY HOSPITAL – Backend (Node.js + Express)
+# St. Dominic Care – Backend (Node.js + Express)
 
 REST API with RBAC, Supabase (DB + Auth JWT), and role-based routes.
 

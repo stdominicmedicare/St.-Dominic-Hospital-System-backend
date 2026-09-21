@@ -21,7 +21,7 @@
 # - Admins: open /admin/security and enroll an authenticator app.
 # - Admin API routes require MFA (AAL2). Password-expired accounts are blocked
 #   on all APIs except /api/auth/me and /api/auth/change-password.
-# - Assign a RecordsOfficer account to own ongoing audit review (St. Dominic / Memon).
+# - Assign a RecordsOfficer account to own ongoing audit review (St. Dominic Care).
 # - Designate a site Super User (see Compliance-Training-Docs).
 # - Apply migration 4 before relying on consent checkboxes / department list.
 #

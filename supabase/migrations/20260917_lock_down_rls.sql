@@ -1,4 +1,4 @@
--- Lock down Supabase RLS for Memon HMS (apply on existing projects).
+-- Lock down Supabase RLS for St. Dominic Care (apply on existing projects).
 --
 -- Problem: bootstrap schema created FOR ALL TO authenticated USING (true)
 -- WITH CHECK (true) on every table, so any logged-in user could read/write

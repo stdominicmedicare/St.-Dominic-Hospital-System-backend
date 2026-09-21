@@ -1,4 +1,4 @@
--- Memon HMS – inferred Supabase schema (empty project bootstrap)
+-- St. Dominic Care – inferred Supabase schema (empty project bootstrap)
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TYPE public.app_role AS ENUM (
