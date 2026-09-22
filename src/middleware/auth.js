@@ -3,7 +3,6 @@
  * Attaches req.user (id, email), req.role and req.profile from profiles table.
  * Rejects deactivated accounts (is_active = false).
  * Hard-blocks expired passwords except /auth/me and /auth/change-password.
- * Requires Admin MFA (AAL2) for /api/admin/* (except when only checking /auth/me).
  */
 import { createClient } from '@supabase/supabase-js';
 import { supabase as supabaseAdmin } from '../config/supabase.js';
@@ -21,11 +20,6 @@ function isPasswordExemptPath(req) {
     path.endsWith('/auth/me') ||
     path.endsWith('/auth/change-password')
   );
-}
-
-function isAdminApiPath(req) {
-  const path = `${req.baseUrl || ''}${req.path || ''}`;
-  return path.startsWith('/api/admin') || (req.baseUrl || '').startsWith('/api/admin');
 }
 
 export async function authMiddleware(req, res, next) {
@@ -88,15 +82,6 @@ export async function authMiddleware(req, res, next) {
   const aal = getAalFromToken(token);
   req.aal = aal;
 
-  // Admins must complete MFA (AAL2) before using admin APIs.
-  // Enrollment itself uses the Supabase client on /admin/security (not these APIs).
-  if (profile?.role === 'Admin' && isAdminApiPath(req) && aal !== 'aal2') {
-    return res.status(403).json({
-      error: 'Admin MFA required. Enroll and verify an authenticator at /admin/security.',
-      code: 'MFA_REQUIRED',
-    });
-  }
-
   req.user = { id: user.id, email: user.email };
   req.role = profile?.role || null;
   req.profile = profile
@@ -104,7 +89,7 @@ export async function authMiddleware(req, res, next) {
         ...profile,
         password_expired: passwordExpired,
         aal,
-        mfa_required: profile.role === 'Admin' && aal !== 'aal2',
+        mfa_required: false,
       }
     : null;
   next();
