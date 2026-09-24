@@ -18,7 +18,7 @@ import {
 import { exportPatientRecord } from '../controllers/report.controller.js';
 
 const router = Router();
-const STAFF = ['Admin', 'Doctor', 'Nurse', 'Receptionist', 'RecordsOfficer'];
+const STAFF = ['Admin', 'Doctor', 'Nurse', 'Receptionist', 'RecordsOfficer', 'Midwife', 'Laboratory', 'Accounts'];
 const REG_MERGE = ['Admin', 'Receptionist', 'RecordsOfficer'];
 
 router.use(authMiddleware);

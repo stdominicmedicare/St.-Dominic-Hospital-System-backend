@@ -447,6 +447,11 @@ export async function getDashboardStats(req, res) {
       ambulancesRes,
       bloodBankRes,
       pharmacyPendingRes,
+      opdTodayRes,
+      openInvoicesRes,
+      pendingLabRes,
+      labourRes,
+      deliveriesMonthRes,
     ] = await Promise.all([
       supabase.from('profiles').select('id', { count: 'exact', head: true }),
       supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'Patient'),
@@ -458,6 +463,11 @@ export async function getDashboardStats(req, res) {
       supabase.from('ambulances').select('id, status'),
       supabase.from('blood_units').select('id', { count: 'exact', head: true }),
       supabase.from('prescriptions').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabase.from('opd_visits').select('id', { count: 'exact', head: true }).eq('visit_date', startOfToday.toISOString().slice(0, 10)),
+      supabase.from('invoices').select('id', { count: 'exact', head: true }).in('status', ['issued', 'partial']),
+      supabase.from('lab_orders').select('id', { count: 'exact', head: true }).in('status', ['ordered', 'collected', 'in_progress']),
+      supabase.from('maternity_admissions').select('id', { count: 'exact', head: true }).eq('status', 'in_labour'),
+      supabase.from('deliveries').select('id', { count: 'exact', head: true }).gte('delivered_at', startOfMonth.toISOString()),
     ]);
 
     const icuBeds = icuBedsRes.data || [];
@@ -485,6 +495,11 @@ export async function getDashboardStats(req, res) {
       ambulancesOnDuty,
       totalBloodUnits,
       pendingPrescriptions: pharmacyPendingRes?.count ?? 0,
+      opdToday: opdTodayRes?.error ? 0 : (opdTodayRes?.count ?? 0),
+      openInvoices: openInvoicesRes?.error ? 0 : (openInvoicesRes?.count ?? 0),
+      pendingLabOrders: pendingLabRes?.error ? 0 : (pendingLabRes?.count ?? 0),
+      inLabour: labourRes?.error ? 0 : (labourRes?.count ?? 0),
+      deliveriesThisMonth: deliveriesMonthRes?.error ? 0 : (deliveriesMonthRes?.count ?? 0),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -55,8 +55,14 @@ import geoRoutes from './routes/geo.routes.js';
 import trackingRoutes from './routes/tracking.routes.js';
 import recordsRoutes from './routes/records.routes.js';
 import reportRoutes from './routes/report.routes.js';
+import opdRoutes from './routes/opd.routes.js';
+import billingRoutes from './routes/billing.routes.js';
+import mchRoutes from './routes/mch.routes.js';
+import labRoutes from './routes/lab.routes.js';
+import programsRoutes from './routes/programs.routes.js';
 
-app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/auth/change-password', authLimiter);
+app.use('/api/auth', authRoutes);
 app.use('/api', apiLimiter);
 app.use('/api/admin', adminRoutes);
 app.use('/api/patient', patientRoutes);
@@ -70,5 +76,10 @@ app.use('/api', geoRoutes);
 app.use('/api/tracking', trackingRoutes);
 app.use('/api/records', recordsRoutes);
 app.use('/api/reports', reportRoutes);
+app.use('/api/opd', opdRoutes);
+app.use('/api/billing', billingRoutes);
+app.use('/api/mch', mchRoutes);
+app.use('/api/lab', labRoutes);
+app.use('/api/programs', programsRoutes);
 
 export default app;

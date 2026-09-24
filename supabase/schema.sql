@@ -4,7 +4,8 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TYPE public.app_role AS ENUM (
   'GeneralUser', 'Patient', 'Doctor', 'Admin', 'Ambulance', 'ICU',
   'Pharmacy', 'BloodBank', 'Blood Bank', 'Volunteer',
-  'Nurse', 'Receptionist', 'RecordsOfficer'
+  'Nurse', 'Receptionist', 'RecordsOfficer',
+  'Midwife', 'Laboratory', 'Accounts'
 );
 CREATE TYPE public.doctor_status AS ENUM ('Available', 'On Leave', 'Busy', 'Inactive');
 CREATE TYPE public.appointment_status AS ENUM ('pending', 'confirmed', 'cancelled', 'completed');

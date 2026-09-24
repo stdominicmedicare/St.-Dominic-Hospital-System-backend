@@ -1,6 +1,6 @@
 /**
- * Reports & export: patient census, visit logs, full patient record.
- * Revenue/billing reports intentionally omitted (no billing module).
+ * Reports & export: patient census, visit logs, full patient record,
+ * revenue, ANC, deliveries, immunization, HIV cascade.
  */
 import { supabase } from '../config/supabase.js';
 import { writeAuditLog } from '../services/auditService.js';
@@ -148,9 +148,39 @@ export async function listReportTypes(req, res) {
         description: 'Complete chart export for referrals or patient requests (pass patientId)',
         formats: ['json', 'xlsx', 'pdf'],
       },
+      {
+        id: 'revenue',
+        name: 'Revenue / receipts',
+        description: 'Payments collected in a date range',
+        formats: ['json', 'xlsx', 'pdf'],
+      },
+      {
+        id: 'anc_attendance',
+        name: 'ANC attendance',
+        description: 'Antenatal visits in a date range',
+        formats: ['json', 'xlsx', 'pdf'],
+      },
+      {
+        id: 'deliveries',
+        name: 'Deliveries',
+        description: 'Delivery outcomes in a date range',
+        formats: ['json', 'xlsx', 'pdf'],
+      },
+      {
+        id: 'immunization_coverage',
+        name: 'Immunization doses',
+        description: 'Immunization doses given in a date range',
+        formats: ['json', 'xlsx', 'pdf'],
+      },
+      {
+        id: 'hiv_cascade',
+        name: 'HIV cascade',
+        description: 'HIV enrollments, ART, and VL documentation counts',
+        formats: ['json', 'xlsx', 'pdf'],
+      },
     ],
     notes: [
-      'Revenue/billing reports are not available — billing is not in scope.',
+      'Program reports require the 20260924_jims_modules migration on Supabase.',
     ],
   });
 }
@@ -275,6 +305,139 @@ export async function getReport(req, res) {
         return res.status(400).json({ error: 'patientId query parameter is required' });
       }
       return exportPatientFullRecord(req, res, patientId, format);
+    }
+
+    if (type === 'revenue') {
+      let q = supabase.from('payments').select('*').order('paid_at', { ascending: false });
+      if (from) q = q.gte('paid_at', from);
+      if (to) q = q.lte('paid_at', to);
+      const { data: rows, error } = await q;
+      if (error) throw new Error(error.message);
+      const list = rows || [];
+      const total = list.reduce((s, r) => s + Number(r.amount || 0), 0);
+      await writeAuditLog({
+        actorId: req.user?.id,
+        actorEmail: req.user?.email,
+        actorRole: req.role,
+        action: 'view',
+        resourceType: 'report',
+        resourceId: type,
+        metadata: { format, from, to, count: list.length },
+        req,
+      });
+      if (format === 'json') return res.json({ type, summary: { total_revenue: total, count: list.length }, rows: list, from, to });
+      const headers = ['Receipt', 'Invoice ID', 'Amount', 'Method', 'Paid At'];
+      const tableRows = list.map((r) => [r.receipt_no, r.invoice_id, r.amount, r.method, formatDate(r.paid_at)]);
+      if (format === 'xlsx') {
+        const buf = await buildExcelBuffer('Revenue', headers, tableRows);
+        return sendBinary(res, buf, { filename: `revenue-${Date.now()}.xlsx`, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      }
+      if (format === 'pdf') {
+        const buf = await buildPdfBuffer('Revenue / Receipts', [
+          { heading: 'Summary', lines: [`Total: ${total}`, `Payments: ${list.length}`] },
+          { heading: 'Payments', table: { headers, rows: tableRows } },
+        ]);
+        return sendBinary(res, buf, { filename: `revenue-${Date.now()}.pdf`, contentType: 'application/pdf' });
+      }
+    }
+
+    if (type === 'anc_attendance') {
+      let q = supabase.from('anc_visits').select('*').order('visit_date', { ascending: false });
+      if (from) q = q.gte('visit_date', from.slice(0, 10));
+      if (to) q = q.lte('visit_date', to.slice(0, 10));
+      const { data: rows, error } = await q;
+      if (error) throw new Error(error.message);
+      const list = rows || [];
+      await writeAuditLog({
+        actorId: req.user?.id, actorEmail: req.user?.email, actorRole: req.role,
+        action: 'view', resourceType: 'report', resourceId: type, metadata: { count: list.length }, req,
+      });
+      if (format === 'json') return res.json({ type, rows: list, count: list.length, from, to });
+      const headers = ['Visit Date', 'Pregnancy ID', 'Visit No', 'Weight', 'BP', 'Next Visit'];
+      const tableRows = list.map((r) => [r.visit_date, r.pregnancy_id, r.visit_no, r.weight_kg, `${r.bp_systolic || ''}/${r.bp_diastolic || ''}`, r.next_visit_date]);
+      if (format === 'xlsx') {
+        const buf = await buildExcelBuffer('ANC', headers, tableRows);
+        return sendBinary(res, buf, { filename: `anc-${Date.now()}.xlsx`, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      }
+      if (format === 'pdf') {
+        const buf = await buildPdfBuffer('ANC Attendance', [{ heading: 'Visits', table: { headers, rows: tableRows } }]);
+        return sendBinary(res, buf, { filename: `anc-${Date.now()}.pdf`, contentType: 'application/pdf' });
+      }
+    }
+
+    if (type === 'deliveries') {
+      let q = supabase.from('deliveries').select('*').order('delivered_at', { ascending: false });
+      if (from) q = q.gte('delivered_at', from);
+      if (to) q = q.lte('delivered_at', to);
+      const { data: rows, error } = await q;
+      if (error) throw new Error(error.message);
+      const list = rows || [];
+      await writeAuditLog({
+        actorId: req.user?.id, actorEmail: req.user?.email, actorRole: req.role,
+        action: 'view', resourceType: 'report', resourceId: type, metadata: { count: list.length }, req,
+      });
+      if (format === 'json') return res.json({ type, rows: list, count: list.length, from, to });
+      const headers = ['Delivered At', 'Mode', 'Outcome', 'Admission ID'];
+      const tableRows = list.map((r) => [formatDate(r.delivered_at), r.mode, r.outcome, r.admission_id]);
+      if (format === 'xlsx') {
+        const buf = await buildExcelBuffer('Deliveries', headers, tableRows);
+        return sendBinary(res, buf, { filename: `deliveries-${Date.now()}.xlsx`, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      }
+      if (format === 'pdf') {
+        const buf = await buildPdfBuffer('Deliveries', [{ heading: 'Records', table: { headers, rows: tableRows } }]);
+        return sendBinary(res, buf, { filename: `deliveries-${Date.now()}.pdf`, contentType: 'application/pdf' });
+      }
+    }
+
+    if (type === 'immunization_coverage') {
+      let q = supabase.from('immunization_records').select('*').order('given_at', { ascending: false });
+      if (from) q = q.gte('given_at', from.slice(0, 10));
+      if (to) q = q.lte('given_at', to.slice(0, 10));
+      const { data: rows, error } = await q;
+      if (error) throw new Error(error.message);
+      const list = rows || [];
+      await writeAuditLog({
+        actorId: req.user?.id, actorEmail: req.user?.email, actorRole: req.role,
+        action: 'view', resourceType: 'report', resourceId: type, metadata: { count: list.length }, req,
+      });
+      if (format === 'json') return res.json({ type, rows: list, count: list.length, from, to });
+      const headers = ['Given At', 'Patient', 'Vaccine', 'Dose', 'Next Due'];
+      const tableRows = list.map((r) => [r.given_at, r.patient_id, r.vaccine_id, r.dose_no, r.next_due]);
+      if (format === 'xlsx') {
+        const buf = await buildExcelBuffer('Immunization', headers, tableRows);
+        return sendBinary(res, buf, { filename: `imm-${Date.now()}.xlsx`, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      }
+      if (format === 'pdf') {
+        const buf = await buildPdfBuffer('Immunization Coverage', [{ heading: 'Doses', table: { headers, rows: tableRows } }]);
+        return sendBinary(res, buf, { filename: `imm-${Date.now()}.pdf`, contentType: 'application/pdf' });
+      }
+    }
+
+    if (type === 'hiv_cascade') {
+      const { data: enrollments, error } = await supabase.from('hiv_enrollments').select('*');
+      if (error) throw new Error(error.message);
+      const list = enrollments || [];
+      const onArt = list.filter((e) => e.art_started).length;
+      const { count: vlCount } = await supabase
+        .from('hiv_lab_results')
+        .select('id', { count: 'exact', head: true })
+        .not('viral_load', 'is', null);
+      await writeAuditLog({
+        actorId: req.user?.id, actorEmail: req.user?.email, actorRole: req.role,
+        action: 'view', resourceType: 'report', resourceId: type, metadata: { enrolled: list.length }, req,
+      });
+      const summary = { enrolled: list.length, on_art: onArt, vl_documented: vlCount ?? 0 };
+      if (format === 'json') return res.json({ type, summary, rows: list.map((e) => ({ id: e.id, status: e.status, art_started: e.art_started, enrollment_date: e.enrollment_date })) });
+      const headers = ['Metric', 'Value'];
+      const tableRows = Object.entries(summary).map(([k, v]) => [k, v]);
+      if (format === 'xlsx') {
+        const buf = await buildExcelBuffer('HIV Cascade', headers, tableRows);
+        return sendBinary(res, buf, { filename: `hiv-cascade-${Date.now()}.xlsx`, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      }
+      if (format === 'pdf') {
+        const buf = await buildPdfBuffer('HIV Cascade', [{ heading: 'Summary', table: { headers, rows: tableRows } }]);
+        return sendBinary(res, buf, { filename: `hiv-cascade-${Date.now()}.pdf`, contentType: 'application/pdf' });
+      }
     }
 
     return res.status(404).json({ error: `Unknown report type: ${type}` });
