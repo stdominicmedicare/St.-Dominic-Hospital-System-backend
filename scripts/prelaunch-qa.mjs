@@ -23,7 +23,7 @@ for (const line of readFileSync(envPath, 'utf8').split('\n')) {
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const ANON = process.env.SUPABASE_ANON_KEY;
 const API = process.env.API_BASE_URL ? `${process.env.API_BASE_URL}/api` : 'http://127.0.0.1:5000/api';
-const ADMIN_EMAIL = process.env.QA_ADMIN_EMAIL || 'admin@memon1.local';
+const ADMIN_EMAIL = process.env.QA_ADMIN_EMAIL || 'admin@stdominic.local';
 const ADMIN_PASS = process.env.QA_ADMIN_PASSWORD || 'Medicare@123@#';
 const TS = Date.now();
 const STAFF_PASS = 'TestStaff@123!';
@@ -74,7 +74,7 @@ async function api(method, path, token, body) {
 const createdStaff = {};
 let patientId = null;
 let patient2Id = null;
-const patientEmail = `qa.patient.${TS}@memon1.local`;
+const patientEmail = `qa.patient.${TS}@stdominic.local`;
 
 async function walkRole(role, allowedPath, deniedPath) {
   const s = createdStaff[role];
@@ -145,15 +145,15 @@ try {
   } else fail('Permissions: list roles', `${roles.status} ${JSON.stringify(roles.data)}`);
 
   const staffDefs = [
-    { role: 'Doctor', email: `qa.doctor.${TS}@memon1.local`, full_name: 'QA Doctor Sample' },
-    { role: 'Nurse', email: `qa.nurse.${TS}@memon1.local`, full_name: 'QA Nurse Sample' },
-    { role: 'Receptionist', email: `qa.desk.${TS}@memon1.local`, full_name: 'QA Front Desk Sample' },
-    { role: 'RecordsOfficer', email: `qa.records.${TS}@memon1.local`, full_name: 'QA Records Officer Sample' },
-    { role: 'Pharmacy', email: `qa.pharmacy.${TS}@memon1.local`, full_name: 'QA Pharmacy Sample' },
-    { role: 'ICU', email: `qa.icu.${TS}@memon1.local`, full_name: 'QA ICU Sample' },
-    { role: 'Ambulance', email: `qa.ambulance.${TS}@memon1.local`, full_name: 'QA Ambulance Sample' },
-    { role: 'BloodBank', email: `qa.bloodbank.${TS}@memon1.local`, full_name: 'QA Blood Bank Sample' },
-    { role: 'Volunteer', email: `qa.volunteer.${TS}@memon1.local`, full_name: 'QA Volunteer Sample' },
+    { role: 'Doctor', email: `qa.doctor.${TS}@stdominic.local`, full_name: 'QA Doctor Sample' },
+    { role: 'Nurse', email: `qa.nurse.${TS}@stdominic.local`, full_name: 'QA Nurse Sample' },
+    { role: 'Receptionist', email: `qa.desk.${TS}@stdominic.local`, full_name: 'QA Front Desk Sample' },
+    { role: 'RecordsOfficer', email: `qa.records.${TS}@stdominic.local`, full_name: 'QA Records Officer Sample' },
+    { role: 'Pharmacy', email: `qa.pharmacy.${TS}@stdominic.local`, full_name: 'QA Pharmacy Sample' },
+    { role: 'ICU', email: `qa.icu.${TS}@stdominic.local`, full_name: 'QA ICU Sample' },
+    { role: 'Ambulance', email: `qa.ambulance.${TS}@stdominic.local`, full_name: 'QA Ambulance Sample' },
+    { role: 'BloodBank', email: `qa.bloodbank.${TS}@stdominic.local`, full_name: 'QA Blood Bank Sample' },
+    { role: 'Volunteer', email: `qa.volunteer.${TS}@stdominic.local`, full_name: 'QA Volunteer Sample' },
   ];
 
   for (const s of staffDefs) {
@@ -174,7 +174,7 @@ try {
 
   if (createdStaff.Doctor) {
     const doc = await api('POST', '/admin/doctors', adminTok, {
-      email: `qa.docprofile.${TS}@memon1.local`,
+      email: `qa.docprofile.${TS}@stdominic.local`,
       password: STAFF_PASS,
       full_name: 'QA Doctor Profile Sample',
       specialty: 'General Medicine',
@@ -211,13 +211,13 @@ try {
 
   const dupReg = await api('POST', '/records/register', adminTok, {
     ...patientBody,
-    email: `qa.patient.dup.${TS}@memon1.local`,
+    email: `qa.patient.dup.${TS}@stdominic.local`,
   });
   if (dupReg.status === 409) ok('Edge: duplicate patient blocked', dupReg.data?.code || '409');
   else fail('Edge: duplicate patient blocked', `${dupReg.status} ${JSON.stringify(dupReg.data)}`);
 
   const patient2 = await api('POST', '/records/register', adminTok, {
-    email: `qa.patient2.${TS}@memon1.local`,
+    email: `qa.patient2.${TS}@stdominic.local`,
     password: 'Patient@Test99!',
     full_name: 'QA Fake Patient Two',
     phone: `0322${String(TS).slice(-7)}`,
@@ -306,7 +306,7 @@ try {
     const dl = await supabaseLogin(createdStaff.Doctor.email, STAFF_PASS);
     if (dl.token) {
       const denied = await api('POST', '/records/register', dl.token, {
-        email: `qa.shouldfail.${TS}@memon1.local`,
+        email: `qa.shouldfail.${TS}@stdominic.local`,
         password: 'Patient@Test99!',
         full_name: 'Should Fail',
         data_consent: true,
@@ -334,10 +334,10 @@ try {
     if (createdStaff[role]?.id) wipeIds.push({ role, id: createdStaff[role].id, email: createdStaff[role].email });
   }
   const allUsers = users.status === 200 ? users.data : [];
-  const docProfile = allUsers.find((u) => u.email === `qa.docprofile.${TS}@memon1.local`);
+  const docProfile = allUsers.find((u) => u.email === `qa.docprofile.${TS}@stdominic.local`);
   if (docProfile) wipeIds.push({ role: 'Doctor', id: docProfile.id, email: docProfile.email });
   if (patientId) wipeIds.push({ role: 'Patient', id: patientId, email: patientEmail });
-  if (patient2Id) wipeIds.push({ role: 'Patient', id: patient2Id, email: `qa.patient2.${TS}@memon1.local` });
+  if (patient2Id) wipeIds.push({ role: 'Patient', id: patient2Id, email: `qa.patient2.${TS}@stdominic.local` });
 
   info('Sample data inventory (for wipe)', wipeIds.map((w) => `${w.role}:${w.email}`).join(' | '));
 

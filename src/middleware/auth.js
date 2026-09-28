@@ -7,6 +7,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { supabase as supabaseAdmin } from '../config/supabase.js';
 import { isPasswordExpired } from '../utils/passwordPolicy.js';
+import { getAalFromToken } from '../utils/jwtClaims.js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -78,12 +79,16 @@ export async function authMiddleware(req, res, next) {
     });
   }
 
+  const aal = getAalFromToken(token);
+  req.aal = aal;
   req.user = { id: user.id, email: user.email };
   req.role = profile?.role || null;
   req.profile = profile
     ? {
         ...profile,
         password_expired: passwordExpired,
+        aal,
+        mfa_required: false,
       }
     : null;
   next();

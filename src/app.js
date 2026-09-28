@@ -32,7 +32,7 @@ app.use(express.json());
 // Health / API root (not rate-limited)
 app.get('/', (req, res) => {
   res.json({
-    message: 'MEMON COMMUNITY HOSPITAL API',
+    message: 'St. Dominic Care API',
     status: 'ok',
     version: '0.0.1',
   });
