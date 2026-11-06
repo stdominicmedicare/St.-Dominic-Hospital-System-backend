@@ -1,14 +1,19 @@
 /**
  * Immunization, family planning, HIV care.
+ * HIV: prefer /api/hms/hiv/* — legacy routes also require can_access_hiv.
  */
 import { supabase } from '../config/supabase.js';
 import { writeAuditLog } from '../services/auditService.js';
-
-const HIV_ROLES = new Set(['Admin', 'Doctor', 'Nurse', 'Midwife']);
+import { canSeePortal, normalizeFlags } from '../permissions/hmsRoles.js';
 
 function assertHivAccess(req, res) {
-  if (!HIV_ROLES.has(req.role)) {
-    res.status(403).json({ error: 'HIV module access denied for this role' });
+  const flags = normalizeFlags(req.profile || {});
+  if (!canSeePortal(req.role, 'hiv', flags)) {
+    res.status(403).json({
+      error: 'HIV module access denied — requires HIV access flag and allowed role',
+      code: 'PORTAL_FORBIDDEN',
+      portal: 'hiv',
+    });
     return false;
   }
   return true;

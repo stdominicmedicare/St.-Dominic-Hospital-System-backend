@@ -5,7 +5,16 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "phase0:verify": "node scripts/phase0-verify.js",
+    "phase1:verify": "node scripts/phase1-verify.js",
+    "phase2:verify": "node scripts/phase2-verify.js",
+    "phase3:verify": "node scripts/phase3-verify.js",
+    "phase4:verify": "node scripts/phase4-verify.js",
+    "phase5:verify": "node scripts/phase5-verify.js",
+    "phase6:verify": "node scripts/phase6-verify.js",
+    "phase7:smoke": "node scripts/phase7-smoke.js",
+    "eod:mark-missed": "node scripts/eod-mark-missed.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.0",

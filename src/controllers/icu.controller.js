@@ -4,6 +4,8 @@
  */
 import { supabase } from '../config/supabase.js';
 import { writeAuditLog } from '../services/auditService.js';
+import { createEncounter } from '../services/encounterService.js';
+import { PATIENT_MIN_FIELDS, safeCreateEncounter } from '../services/patientProfileFields.js';
 
 /** Get ICU dashboard: beds, stats, pending admission requests, critical alerts. */
 export async function getDashboard(req, res) {
@@ -33,7 +35,7 @@ export async function getDashboard(req, res) {
     const patientMap = {};
     const doctorMap = {};
     if (patientIds.length > 0) {
-      const { data: patients } = await supabase.from('profiles').select('id, full_name').in('id', patientIds);
+      const { data: patients } = await supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', patientIds);
       (patients || []).forEach((p) => { patientMap[p.id] = p; });
     }
     if (doctorIds.length > 0) {
@@ -56,7 +58,7 @@ export async function getDashboard(req, res) {
     const allPatientIds = [...new Set([...patientIdsInBeds, ...admittedPatientIds])];
     const bedPatientMap = {};
     if (allPatientIds.length > 0) {
-      const { data: bedPatients } = await supabase.from('profiles').select('id, full_name').in('id', allPatientIds);
+      const { data: bedPatients } = await supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', allPatientIds);
       (bedPatients || []).forEach((p) => { bedPatientMap[p.id] = p; });
     }
     const recordByBed = {};
@@ -148,7 +150,7 @@ export async function getAdmissionRequests(req, res) {
     const patientMap = {};
     const doctorMap = {};
     if (patientIds.length > 0) {
-      const { data: patients } = await supabase.from('profiles').select('id, full_name, email').in('id', patientIds);
+      const { data: patients } = await supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', patientIds);
       (patients || []).forEach((p) => { patientMap[p.id] = p; });
     }
     if (doctorIds.length > 0) {
@@ -231,6 +233,16 @@ export async function approveRequest(req, res) {
         .from('icu_beds')
         .update({ admission_id: admissionRecord?.id, updated_at: new Date().toISOString() })
         .eq('id', assigned_bed_id);
+
+      await safeCreateEncounter(createEncounter, {
+        patientId: reqRow.patient_id,
+        module: 'icu',
+        staffId: userId,
+        status: 'in_progress',
+        metadata: { kind: 'admission', bed_id: assigned_bed_id },
+        sourceTable: 'icu_admission_records',
+        sourceId: admissionRecord?.id,
+      });
     }
 
     await writeAuditLog({
@@ -244,6 +256,7 @@ export async function approveRequest(req, res) {
       after: updated,
       before: { request_status: reqRow.request_status },
       req,
+      module: 'icu',
     });
     res.json(updated);
   } catch (err) {
@@ -338,12 +351,23 @@ export async function assignBed(req, res) {
       .select()
       .single();
 
+    await safeCreateEncounter(createEncounter, {
+      patientId: reqRow.patient_id,
+      module: 'icu',
+      staffId: req.user?.id,
+      status: 'in_progress',
+      metadata: { kind: 'admission', bed_id: assigned_bed_id },
+      sourceTable: 'icu_admission_records',
+      sourceId: admissionRecord?.id,
+    });
+
     await writeAuditLog({
       actorId: req.user?.id,
       actorEmail: req.user?.email,
       actorRole: req.role,
       action: 'edit',
       resourceType: 'icu_admission_request',
+      module: 'icu',
       resourceId: id,
       patientId: reqRow.patient_id,
       after: updated || { ok: true, assigned_bed_id },
@@ -389,7 +413,7 @@ export async function getIncomingPatients(req, res) {
     const ambulanceIds = [...new Set(trips.map((t) => t.ambulance_id).filter(Boolean))];
 
     const [patientsRes, doctorsRes, driversRes, ambulancesRes] = await Promise.all([
-      patientIdsInTrip.length ? supabase.from('profiles').select('id, full_name').in('id', patientIdsInTrip) : { data: [] },
+      patientIdsInTrip.length ? supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', patientIdsInTrip) : { data: [] },
       doctorIds.length ? supabase.from('profiles').select('id, full_name').in('id', doctorIds) : { data: [] },
       driverIds.length ? supabase.from('profiles').select('id, full_name, phone').in('id', driverIds) : { data: [] },
       ambulanceIds.length ? supabase.from('ambulances').select('id, vehicle_number').in('id', ambulanceIds) : { data: [] },
@@ -434,7 +458,7 @@ export async function getActivePatients(req, res) {
     const bedIds = [...new Set(records.map((r) => r.bed_id))];
     const patientIds = [...new Set(records.map((r) => r.patient_id))];
     const { data: beds } = await supabase.from('icu_beds').select('id, bed_number, bed_type, ward, floor').in('id', bedIds);
-    const { data: patients } = await supabase.from('profiles').select('id, full_name').in('id', patientIds);
+    const { data: patients } = await supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', patientIds);
     const bedMap = Object.fromEntries((beds || []).map((b) => [b.id, b]));
     const patientMap = Object.fromEntries((patients || []).map((p) => [p.id, p]));
 
@@ -544,6 +568,16 @@ export async function dischargePatient(req, res) {
       })
       .eq('id', record.bed_id);
 
+    await safeCreateEncounter(createEncounter, {
+      patientId: record.patient_id,
+      module: 'icu',
+      staffId: req.user?.id,
+      status: 'done',
+      metadata: { kind: 'discharge', discharge_reason, final_status },
+      sourceTable: 'icu_admission_records',
+      sourceId: id,
+    });
+
     await writeAuditLog({
       actorId: req.user?.id,
       actorEmail: req.user?.email,
@@ -555,6 +589,7 @@ export async function dischargePatient(req, res) {
       after: { ok: true, discharge_time: now, discharge_reason, final_status },
       before: record,
       req,
+      module: 'icu',
     });
     res.json({ ok: true, discharge_time: now });
   } catch (err) {
@@ -659,7 +694,7 @@ export async function getHistory(req, res) {
     const patientMap = {};
     const bedMap = {};
     if (patientIds.length > 0) {
-      const { data: patients } = await supabase.from('profiles').select('id, full_name').in('id', patientIds);
+      const { data: patients } = await supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', patientIds);
       (patients || []).forEach((p) => { patientMap[p.id] = p; });
     }
     if (bedIds.length > 0) {
