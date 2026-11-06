@@ -1,8 +1,11 @@
 /**
  * Doctor API: patients, appointments (accept/reject), medical records, prescriptions. Scoped to req.user.id (doctor_id).
+ * Phase 6: shared MRN on patient projections + encounter rows for Home/Reports.
  */
 import { supabase } from '../config/supabase.js';
 import { writeAuditLog } from '../services/auditService.js';
+import { createEncounter } from '../services/encounterService.js';
+import { PATIENT_MIN_FIELDS, safeCreateEncounter } from '../services/patientProfileFields.js';
 
 export async function getPatients(req, res) {
   try {
@@ -17,7 +20,7 @@ export async function getPatients(req, res) {
     if (patientIds.length === 0) return res.json([]);
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, full_name, email')
+      .select(PATIENT_MIN_FIELDS)
       .in('id', patientIds)
       .order('full_name');
     if (error) return res.status(500).json({ error: error.message });
@@ -40,7 +43,7 @@ export async function getAppointments(req, res) {
     const patientIds = [...new Set((rows || []).map((r) => r.patient_id).filter(Boolean))];
     const patients =
       patientIds.length > 0
-        ? await supabase.from('profiles').select('id, full_name, email').in('id', patientIds)
+        ? await supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', patientIds)
         : { data: [] };
     const patientMap = Object.fromEntries((patients.data || []).map((p) => [p.id, p]));
     const data = (rows || []).map((r) => ({
@@ -95,7 +98,7 @@ export async function getRecords(req, res) {
     const patientIds = [...new Set((rows || []).map((r) => r.patient_id).filter(Boolean))];
     const patients =
       patientIds.length > 0
-        ? await supabase.from('profiles').select('id, full_name, email').in('id', patientIds)
+        ? await supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', patientIds)
         : { data: [] };
     const patientMap = Object.fromEntries((patients.data || []).map((p) => [p.id, p]));
     const data = (rows || []).map((r) => ({
@@ -112,6 +115,7 @@ export async function getRecords(req, res) {
       patientId: patient_id || null,
       metadata: { count: data.length, scoped: 'doctor' },
       req,
+      module: 'doctor',
     });
 
     res.json(data);
@@ -142,6 +146,16 @@ export async function createRecord(req, res) {
 
     if (error) return res.status(400).json({ error: error.message });
 
+    await safeCreateEncounter(createEncounter, {
+      patientId: patient_id,
+      module: 'doctor',
+      staffId: doctorId,
+      status: 'done',
+      metadata: { kind: 'medical_record', diagnosis: diagnosis || null },
+      sourceTable: 'medical_records',
+      sourceId: data.id,
+    });
+
     await writeAuditLog({
       actorId: doctorId,
       actorEmail: req.user.email,
@@ -152,6 +166,7 @@ export async function createRecord(req, res) {
       patientId: patient_id,
       after: data,
       req,
+      module: 'doctor',
     });
 
     res.status(201).json(data);
@@ -263,7 +278,7 @@ export async function getPrescriptions(req, res) {
     const patientIds = [...new Set((rows || []).map((r) => r.patient_id).filter(Boolean))];
     const patients =
       patientIds.length > 0
-        ? await supabase.from('profiles').select('id, full_name, email').in('id', patientIds)
+        ? await supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', patientIds)
         : { data: [] };
     const patientMap = Object.fromEntries((patients.data || []).map((p) => [p.id, p]));
     const data = (rows || []).map((r) => ({
@@ -300,6 +315,17 @@ export async function createPrescription(req, res) {
       .single();
 
     if (error) return res.status(400).json({ error: error.message });
+
+    await safeCreateEncounter(createEncounter, {
+      patientId: patient_id,
+      module: 'doctor',
+      staffId: doctorId,
+      status: 'done',
+      metadata: { kind: 'prescription', medication },
+      sourceTable: 'prescriptions',
+      sourceId: data.id,
+    });
+
     res.status(201).json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -360,6 +386,15 @@ export async function createEmergencyRequest(req, res) {
           .select()
           .single();
         if (retry.error) return res.status(400).json({ error: retry.error.message });
+        await safeCreateEncounter(createEncounter, {
+          patientId: patient_id,
+          module: 'ambulance',
+          staffId: doctorId,
+          status: 'waiting',
+          metadata: { kind: 'doctor_request', priority: pr },
+          sourceTable: 'ambulance_requests',
+          sourceId: retry.data.id,
+        });
         await writeAuditLog({
           actorId: doctorId,
           actorEmail: req.user?.email,
@@ -371,12 +406,22 @@ export async function createEmergencyRequest(req, res) {
           after: retry.data,
           metadata: { source: 'doctor_emergency' },
           req,
+          module: 'ambulance',
         });
         return res.status(201).json(retry.data);
       }
       return res.status(400).json({ error: error.message });
     }
 
+    await safeCreateEncounter(createEncounter, {
+      patientId: patient_id,
+      module: 'ambulance',
+      staffId: doctorId,
+      status: 'waiting',
+      metadata: { kind: 'doctor_request', priority: pr },
+      sourceTable: 'ambulance_requests',
+      sourceId: data.id,
+    });
     await writeAuditLog({
       actorId: doctorId,
       actorEmail: req.user?.email,
@@ -388,6 +433,7 @@ export async function createEmergencyRequest(req, res) {
       after: data,
       metadata: { source: 'doctor_emergency' },
       req,
+      module: 'ambulance',
     });
     res.status(201).json(data);
   } catch (err) {
@@ -417,6 +463,17 @@ export async function requestIcuAdmission(req, res) {
       .single();
 
     if (error) return res.status(500).json({ error: error.message });
+
+    await safeCreateEncounter(createEncounter, {
+      patientId: patient_id,
+      module: 'icu',
+      staffId: doctorId,
+      status: 'waiting',
+      metadata: { kind: 'admission_request', priority },
+      sourceTable: 'icu_admission_requests',
+      sourceId: data.id,
+    });
+
     res.status(201).json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -450,7 +507,7 @@ export async function getTransferTrips(req, res) {
     const requestByPatient = {};
     myRequests.forEach((r) => { requestByPatient[r.patient_id] = r; });
     const patientIdsInTrip = [...new Set(trips.map((t) => t.patient_id))];
-    const { data: patients } = await supabase.from('profiles').select('id, full_name').in('id', patientIdsInTrip);
+    const { data: patients } = await supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', patientIdsInTrip);
     const patientMap = Object.fromEntries((patients || []).map((p) => [p.id, p]));
 
     const list = trips.map((trip) => ({
@@ -482,7 +539,7 @@ export async function getMyIcuRequests(req, res) {
     const patientMap = {};
     const bedMap = {};
     if (patientIds.length > 0) {
-      const { data: patients } = await supabase.from('profiles').select('id, full_name').in('id', patientIds);
+      const { data: patients } = await supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', patientIds);
       (patients || []).forEach((p) => { patientMap[p.id] = p; });
     }
     if (bedIds.length > 0) {
@@ -555,6 +612,17 @@ export async function createBloodRequest(req, res) {
       .select()
       .single();
     if (error) return res.status(500).json({ error: error.message });
+
+    await safeCreateEncounter(createEncounter, {
+      patientId: patient_id,
+      module: 'bloodbank',
+      staffId: doctorId,
+      status: urgency === 'emergency' ? 'urgent' : 'waiting',
+      metadata: { kind: 'blood_request', blood_group_required, units },
+      sourceTable: 'blood_requests',
+      sourceId: data.id,
+    });
+
     res.status(201).json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
