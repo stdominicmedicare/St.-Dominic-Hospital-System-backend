@@ -1,5 +1,6 @@
 /**
  * Role guard: require one of the given roles. Use after authMiddleware.
+ * Prefer requirePortal / requireFlag from ./permissions.js for HMS portals.
  */
 export function requireRole(...allowedRoles) {
   return (req, res, next) => {
@@ -12,3 +13,9 @@ export function requireRole(...allowedRoles) {
     next();
   };
 }
+
+export {
+  requirePortal,
+  requireFlag,
+  requireExportPermission,
+} from './permissions.js';

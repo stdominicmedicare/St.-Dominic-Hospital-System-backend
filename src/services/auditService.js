@@ -1,18 +1,33 @@
 /**
- * Append-only audit logging for PHI access (medical records).
+ * Append-only audit logging for PHI + security events.
  * Writes via service_role; table has no UPDATE/DELETE grants for app roles.
  */
 import { supabase } from '../config/supabase.js';
+
+export const AUDIT_ACTIONS = [
+  'view',
+  'create',
+  'edit',
+  'delete',
+  'delete_void',
+  'login',
+  'logout',
+  'failed_login',
+  'print',
+  'export',
+  'permission_change',
+];
 
 /**
  * @param {object} entry
  * @param {string|null} entry.actorId
  * @param {string|null} [entry.actorEmail]
  * @param {string|null} [entry.actorRole]
- * @param {'view'|'create'|'edit'|'delete'} entry.action
+ * @param {string} entry.action
  * @param {string} [entry.resourceType]
  * @param {string|null} [entry.resourceId]
  * @param {string|null} [entry.patientId]
+ * @param {string|null} [entry.module]
  * @param {object|null} [entry.before]
  * @param {object|null} [entry.after]
  * @param {object|null} [entry.metadata]
@@ -26,12 +41,17 @@ export async function writeAuditLog({
   resourceType = 'medical_record',
   resourceId = null,
   patientId = null,
+  module = null,
   before = null,
   after = null,
   metadata = null,
   req = null,
 }) {
   try {
+    if (!AUDIT_ACTIONS.includes(action)) {
+      console.error('[audit] invalid action:', action);
+      return;
+    }
     const row = {
       actor_id: actorId,
       actor_email: actorEmail,
@@ -42,11 +62,30 @@ export async function writeAuditLog({
       patient_id: patientId,
       before_data: before,
       after_data: after,
-      metadata: metadata || {},
+      metadata: {
+        ...(metadata || {}),
+        ...(module ? { module } : {}),
+      },
       ip_address: req?.ip || req?.headers?.['x-forwarded-for'] || null,
       user_agent: req?.headers?.['user-agent'] || null,
     };
-    const { error } = await supabase.from('audit_logs').insert(row);
+    if (module) row.module = module;
+
+    let { error } = await supabase.from('audit_logs').insert(row);
+    // Pre-migration DBs may lack `module` or expanded action CHECK — retry safely.
+    if (error && /module|action|check/i.test(error.message || '')) {
+      const fallbackAction = ['view', 'create', 'edit', 'delete'].includes(action)
+        ? action
+        : 'view';
+      const { module: _m, ...legacy } = row;
+      legacy.action = fallbackAction;
+      legacy.metadata = {
+        ...(legacy.metadata || {}),
+        intended_action: action,
+        module: module || undefined,
+      };
+      ({ error } = await supabase.from('audit_logs').insert(legacy));
+    }
     if (error) {
       console.error('[audit] write failed:', error.message);
     }
@@ -64,6 +103,7 @@ export async function listAuditLogs({
   from,
   to,
   action,
+  module,
   limit = 100,
   offset = 0,
 } = {}) {
@@ -76,6 +116,7 @@ export async function listAuditLogs({
   if (patientId) q = q.eq('patient_id', patientId);
   if (actorId) q = q.eq('actor_id', actorId);
   if (action) q = q.eq('action', action);
+  if (module) q = q.eq('module', module);
   if (from) q = q.gte('created_at', from);
   if (to) q = q.lte('created_at', to);
 

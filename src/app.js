@@ -16,6 +16,17 @@ const frontendUrls = fromEnv.length ? fromEnv : [defaultOrigin];
 if (process.env.NODE_ENV === 'production' && !frontendUrls.includes(PRODUCTION_FRONTEND)) {
   frontendUrls.push(PRODUCTION_FRONTEND);
 }
+// Browsers treat localhost and 127.0.0.1 as different origins.
+if (process.env.NODE_ENV !== 'production') {
+  for (const origin of [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://localhost:5173',
+    'https://127.0.0.1:5173',
+  ]) {
+    if (!frontendUrls.includes(origin)) frontendUrls.push(origin);
+  }
+}
 
 app.use(cors({
   origin: frontendUrls,
@@ -60,8 +71,11 @@ import billingRoutes from './routes/billing.routes.js';
 import mchRoutes from './routes/mch.routes.js';
 import labRoutes from './routes/lab.routes.js';
 import programsRoutes from './routes/programs.routes.js';
+import hmsRoutes from './routes/hms.routes.js';
 
 app.use('/api/auth/change-password', authLimiter);
+app.use('/api/auth/failed-login', authLimiter);
+app.use('/api/auth/check-lock', authLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api', apiLimiter);
 app.use('/api/admin', adminRoutes);
@@ -81,5 +95,6 @@ app.use('/api/billing', billingRoutes);
 app.use('/api/mch', mchRoutes);
 app.use('/api/lab', labRoutes);
 app.use('/api/programs', programsRoutes);
+app.use('/api/hms', hmsRoutes);
 
 export default app;

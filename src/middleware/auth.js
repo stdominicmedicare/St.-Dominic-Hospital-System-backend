@@ -1,8 +1,9 @@
 /**
  * Auth middleware: verify Supabase JWT from Authorization: Bearer <token>.
  * Attaches req.user (id, email), req.role and req.profile from profiles table.
- * Rejects deactivated accounts (is_active = false).
- * Hard-blocks expired passwords except /auth/me and /auth/change-password.
+ * Rejects deactivated / locked accounts.
+ * Hard-blocks expired passwords / force-change except /auth/me and /auth/change-password.
+ * MFA: Administrators always have mfa_required; soft/hard gate via ENABLE_MFA_ENFORCEMENT.
  */
 import { createClient } from '@supabase/supabase-js';
 import { supabase as supabaseAdmin } from '../config/supabase.js';
@@ -17,9 +18,24 @@ function isPasswordExemptPath(req) {
   return (
     path === '/api/auth/me' ||
     path === '/api/auth/change-password' ||
+    path === '/api/auth/logout' ||
+    path === '/api/auth/login-success' ||
+    path === '/api/auth/mfa/status' ||
+    path === '/api/auth/mfa/challenge' ||
     path.endsWith('/auth/me') ||
-    path.endsWith('/auth/change-password')
+    path.endsWith('/auth/change-password') ||
+    path.endsWith('/auth/logout') ||
+    path.endsWith('/auth/login-success') ||
+    path.endsWith('/auth/mfa/status') ||
+    path.endsWith('/auth/mfa/challenge')
   );
+}
+
+function isMfaExemptPath(req) {
+  return isPasswordExemptPath(req) || (() => {
+    const path = `${req.baseUrl || ''}${req.path || ''}`;
+    return path.endsWith('/auth/login-success');
+  })();
 }
 
 export async function authMiddleware(req, res, next) {
@@ -48,20 +64,38 @@ export async function authMiddleware(req, res, next) {
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 
+  const PROFILE_SELECT =
+    'id, email, role, full_name, phone, department, is_active, password_changed_at, require_password_change, mfa_required, failed_login_count, locked_until, last_login_at, can_access_hiv, can_verify_lab, can_give_discounts, can_export_reports';
+
   let { data: profile, error: profileError } = await supabaseAdmin
     .from('profiles')
-    .select('id, email, role, full_name, is_active, password_changed_at')
+    .select(PROFILE_SELECT)
     .eq('id', user.id)
     .single();
 
-  // Fallback if password_changed_at column not migrated yet
-  if (profileError && String(profileError.message || '').includes('password_changed_at')) {
+  // Fallback if newer columns not migrated yet
+  if (
+    profileError &&
+    /password_changed_at|can_access_hiv|require_password_change|mfa_required|locked_until|failed_login|department|last_login/i.test(
+      String(profileError.message || '')
+    )
+  ) {
     const fallback = await supabaseAdmin
       .from('profiles')
-      .select('id, email, role, full_name, is_active')
+      .select(
+        'id, email, role, full_name, is_active, password_changed_at, can_access_hiv, can_verify_lab, can_give_discounts, can_export_reports'
+      )
       .eq('id', user.id)
       .single();
     profile = fallback.data;
+    if (fallback.error && String(fallback.error.message || '').includes('password_changed_at')) {
+      const basic = await supabaseAdmin
+        .from('profiles')
+        .select('id, email, role, full_name, is_active')
+        .eq('id', user.id)
+        .single();
+      profile = basic.data;
+    }
   }
 
   if (profile && profile.is_active === false) {
@@ -71,24 +105,63 @@ export async function authMiddleware(req, res, next) {
     });
   }
 
-  const passwordExpired = isPasswordExpired(profile?.password_changed_at);
+  if (
+    profile?.locked_until &&
+    new Date(profile.locked_until).getTime() > Date.now() &&
+    !isPasswordExemptPath(req)
+  ) {
+    return res.status(403).json({
+      error: 'Account locked after failed logins. Contact an administrator or wait for lockout to expire.',
+      code: 'ACCOUNT_LOCKED',
+      locked_until: profile.locked_until,
+    });
+  }
+
+  const forceChange = Boolean(profile?.require_password_change);
+  const passwordExpired = forceChange || isPasswordExpired(profile?.password_changed_at);
   if (passwordExpired && !isPasswordExemptPath(req)) {
     return res.status(403).json({
-      error: 'Password expired. Change your password to continue.',
-      code: 'PASSWORD_EXPIRED',
+      error: forceChange
+        ? 'Password change required before continuing.'
+        : 'Password expired. Change your password to continue.',
+      code: forceChange ? 'PASSWORD_CHANGE_REQUIRED' : 'PASSWORD_EXPIRED',
     });
   }
 
   const aal = getAalFromToken(token);
+  const isAdmin = profile?.role === 'Admin';
+  const mfaRequired = isAdmin || Boolean(profile?.mfa_required);
+  const mfaOk = !mfaRequired || aal === 'aal2';
+  const enforceMfa = process.env.ENABLE_MFA_ENFORCEMENT === 'true';
+
+  if (enforceMfa && mfaRequired && !mfaOk && !isMfaExemptPath(req)) {
+    return res.status(403).json({
+      error: '2-step verification required for this account.',
+      code: 'MFA_REQUIRED',
+      aal,
+      // TODO: SMS/TOTP provider — use POST /api/auth/mfa/challenge when configured
+    });
+  }
+
   req.aal = aal;
   req.user = { id: user.id, email: user.email };
   req.role = profile?.role || null;
+  req.flags = {
+    can_access_hiv: Boolean(profile?.can_access_hiv),
+    can_verify_lab: Boolean(profile?.can_verify_lab),
+    can_give_discounts: Boolean(profile?.can_give_discounts),
+    can_export_reports: Boolean(profile?.can_export_reports),
+  };
   req.profile = profile
     ? {
         ...profile,
+        ...req.flags,
         password_expired: passwordExpired,
+        require_password_change: forceChange,
+        mfa_required: mfaRequired,
+        mfa_ok: mfaOk,
+        mfa_enforced: enforceMfa,
         aal,
-        mfa_required: false,
       }
     : null;
   next();

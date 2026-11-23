@@ -4,6 +4,8 @@
  */
 import { supabase } from '../config/supabase.js';
 import { writeAuditLog } from '../services/auditService.js';
+import { createEncounter } from '../services/encounterService.js';
+import { PATIENT_MIN_FIELDS, safeCreateEncounter } from '../services/patientProfileFields.js';
 
 const BLOOD_GROUPS = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-'];
 const CRITICAL_THRESHOLD = 5;
@@ -361,8 +363,8 @@ export async function getBloodRequests(req, res) {
     const patientIds = [...new Set(list.map((r) => r.patient_id))];
     const doctorIds = [...new Set(list.map((r) => r.doctor_id))];
     const [patientsRes, doctorsRes] = await Promise.all([
-      patientIds.length ? supabase.from('profiles').select('id, full_name').in('id', patientIds) : { data: [] },
-      doctorIds.length ? supabase.from('profiles').select('id, full_name').in('id', doctorIds) : { data: [] },
+      patientIds.length ? supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', patientIds) : { data: [] },
+      doctorIds.length ? supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', doctorIds) : { data: [] },
     ]);
     const patientMap = Object.fromEntries((patientsRes.data || []).map((p) => [p.id, p]));
     const doctorMap = Object.fromEntries((doctorsRes.data || []).map((d) => [d.id, d]));
@@ -467,6 +469,17 @@ export async function allocateRequest(req, res) {
     await supabase.from('blood_requests').update({ request_status: 'fulfilled', updated_at: new Date().toISOString() }).eq('id', id);
     const { data: allocations } = await supabase.from('blood_allocations').select('*').eq('request_id', id);
     const result = { allocated: availableUnits.length, allocations: allocations || [] };
+    if (reqRow.patient_id) {
+      await safeCreateEncounter(createEncounter, {
+        patientId: reqRow.patient_id,
+        module: 'bloodbank',
+        staffId: userId,
+        status: 'done',
+        metadata: { kind: 'allocate', units: availableUnits.length, blood_group: bloodGroup },
+        sourceTable: 'blood_requests',
+        sourceId: id,
+      });
+    }
     await writeAuditLog({
       actorId: req.user?.id,
       actorEmail: req.user?.email,
@@ -478,6 +491,7 @@ export async function allocateRequest(req, res) {
       after: result,
       before: { request_status: reqRow.request_status },
       req,
+      module: 'bloodbank',
     });
     res.json(result);
   } catch (err) {
@@ -503,6 +517,15 @@ export async function recordTransfusion(req, res) {
     }).select().single();
     if (error) return res.status(500).json({ error: error.message });
     await supabase.from('blood_units').update({ status: 'transfused', updated_at: new Date().toISOString() }).eq('id', unit_id);
+    await safeCreateEncounter(createEncounter, {
+      patientId: patient_id,
+      module: 'bloodbank',
+      staffId: req.user?.id,
+      status: 'done',
+      metadata: { kind: 'transfusion', unit_id, doctor_id },
+      sourceTable: 'transfusion_logs',
+      sourceId: log.id,
+    });
     await writeAuditLog({
       actorId: req.user?.id,
       actorEmail: req.user?.email,
@@ -513,6 +536,7 @@ export async function recordTransfusion(req, res) {
       patientId: patient_id,
       after: log,
       req,
+      module: 'bloodbank',
     });
     res.status(201).json(log);
   } catch (err) {

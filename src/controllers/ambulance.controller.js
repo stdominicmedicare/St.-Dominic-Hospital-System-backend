@@ -4,6 +4,8 @@
  */
 import { supabase } from '../config/supabase.js';
 import { writeAuditLog } from '../services/auditService.js';
+import { createEncounter } from '../services/encounterService.js';
+import { PATIENT_MIN_FIELDS, safeCreateEncounter } from '../services/patientProfileFields.js';
 
 const DRIVER_FLEET_DEPOT = { lat: 40.7128, lng: -74.006 };
 const ACTIVE_TRIP_STATUSES = ['en_route', 'arrived', 'patient_picked', 'arrived_at_hospital'];
@@ -60,7 +62,7 @@ export async function getDriverFleetView(req, res) {
     const driverIds = [...new Set(ambulances.map((a) => a.driver_id).filter(Boolean))];
     let driverMap = {};
     if (driverIds.length > 0) {
-      const { data: drivers } = await supabase.from('profiles').select('id, full_name').in('id', driverIds);
+      const { data: drivers } = await supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', driverIds);
       driverMap = Object.fromEntries((drivers || []).map((d) => [d.id, d]));
     }
 
@@ -154,14 +156,14 @@ export async function getDashboard(req, res) {
     ].filter(Boolean))];
     const patientMap = {};
     if (allRequestIds.length > 0) {
-      const { data: patients } = await supabase.from('profiles').select('id, full_name').in('id', allRequestIds);
+      const { data: patients } = await supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', allRequestIds);
       (patients || []).forEach((p) => { patientMap[p.id] = p; });
     }
 
     const completedPatientIds = [...new Set((completedByMe || []).map((r) => r.patient_id).filter(Boolean))];
     completedPatientIds.forEach((id) => { if (!patientMap[id]) allRequestIds.push(id); });
     if (completedPatientIds.length > 0) {
-      const { data: completedPatients } = await supabase.from('profiles').select('id, full_name').in('id', completedPatientIds);
+      const { data: completedPatients } = await supabase.from('profiles').select(PATIENT_MIN_FIELDS).in('id', completedPatientIds);
       (completedPatients || []).forEach((p) => { patientMap[p.id] = p; });
     }
 
@@ -554,6 +556,18 @@ export async function completeTrip(req, res) {
         .eq('id', request.ambulance_id);
     }
 
+    if (data.patient_id) {
+      await safeCreateEncounter(createEncounter, {
+        patientId: data.patient_id,
+        module: 'ambulance',
+        staffId: driverId,
+        status: 'done',
+        metadata: { kind: 'trip_complete' },
+        sourceTable: 'ambulance_requests',
+        sourceId: id,
+      });
+    }
+
     await writeAuditLog({
       actorId: req.user?.id,
       actorEmail: req.user?.email,
@@ -565,6 +579,7 @@ export async function completeTrip(req, res) {
       after: data,
       before: { status: request.status },
       req,
+      module: 'ambulance',
     });
     res.json(data);
   } catch (err) {
